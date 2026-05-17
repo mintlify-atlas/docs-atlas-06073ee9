@@ -1,0 +1,95 @@
+---
+title: "rskey encrypt — encrypt sensitive configuration values"
+description: "rskey encrypt uses a secret key file to encrypt sensitive values interactively or from stdin. Supports default, fips, and workbench modes. Flags: -f, --mode."
+---
+
+`rskey encrypt` takes a plaintext value and produces an encrypted ciphertext string suitable for use in Posit Connect or Package Manager configuration files. When you run it interactively, the terminal is put into raw mode so that what you type is never echoed to the screen. When stdin is a pipe, the command reads line-separated values in batch, producing one ciphertext per line. Choose the encryption mode that matches your product version and compliance requirements.
+
+## Synopsis
+
+```bash
+rskey encrypt -f <keyfile> [--mode <mode>]
+```
+
+## Flags
+
+<ParamField query="-f, --keyfile" type="string" required>
+  Path to the key file to use for encryption. The file must exist and be
+  readable. Required.
+</ParamField>
+
+<ParamField query="--mode" type="string" default="default">
+  Encryption algorithm. One of `default`, `fips`, or `workbench`.
+</ParamField>
+
+## Encryption modes
+
+<AccordionGroup>
+  <Accordion title="default — NaCl Secretbox">
+    The standard mode for Posit Connect and Package Manager. Uses the
+    [NaCl Secretbox](https://pkg.go.dev/golang.org/x/crypto/nacl/secretbox)
+    authenticated encryption algorithm. Compatible with all supported versions
+    of Connect and Package Manager.
+  </Accordion>
+
+  <Accordion title="fips — AES-256-GCM">
+    Available for Connect 2022.03.0 and later, and Package Manager 2024.04.0
+    and later. Uses AES-256-GCM, an Approved Security Function under
+    [FIPS 140](https://csrc.nist.gov/publications/detail/fips/140/3/final).
+    Use this mode when your environment requires FIPS-compliant cryptography.
+  </Accordion>
+
+  <Accordion title="workbench — AES-128-CBC">
+    Use this mode to encrypt secrets for Posit Workbench (e.g., values stored
+    in `secure-cookie-key`). Uses AES-128-CBC to match the algorithm expected
+    by `rstudio-server encrypt-password`. Both the rskey-generated key format
+    and the UUID key format are accepted.
+  </Accordion>
+</AccordionGroup>
+
+## Interactive usage
+
+When stdin is a terminal, `rskey encrypt` prompts you to type the sensitive
+value twice with no echo:
+
+```
+Type the sensitive data to encrypt, then press Enter:
+Type the sensitive data again:
+```
+
+If the two entries do not match, the command exits with an error and no
+ciphertext is produced.
+
+## Stdin (batch) usage
+
+When stdin is a pipe, `rskey encrypt` reads one plaintext value per line and
+writes one ciphertext per line to stdout, in the same order. This is useful
+for encrypting multiple values in a single invocation.
+
+## Examples
+
+<CodeGroup>
+
+```bash Interactive encryption
+rskey encrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+```
+
+```bash Encrypt values from a file
+cat passwords.txt | rskey encrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+```
+
+```bash FIPS mode (AES-256-GCM)
+rskey encrypt -f connect.key --mode=fips
+```
+
+```bash Workbench mode (AES-128-CBC)
+rskey encrypt --mode=workbench -f /etc/rstudio/secure-cookie-key
+```
+
+</CodeGroup>
+
+<Tip>
+  `rskey encrypt` is a drop-in replacement for `rscadmin configure
+  --encrypt-config-value` (Connect) and `rspm encrypt` (Package Manager). No
+  local product installation or license key is needed.
+</Tip>

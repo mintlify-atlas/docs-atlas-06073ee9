@@ -1,0 +1,54 @@
+---
+title: "rskey fingerprint — identify keys without exposing secrets"
+description: "rskey fingerprint prints a short identifier for a key file. Useful for tracking key rotation in logs. Alias: rskey fp. Flags: -f, --mode."
+---
+
+`rskey fingerprint` (also available as `rskey fp`) prints a short, deterministic identifier derived from a key file. Posit Connect, Package Manager, and Workbench log this fingerprint at startup so that you can confirm which key is loaded without ever exposing the key material itself. The fingerprint is stable — the same key always produces the same output — making it suitable for tracking key rotation across servers and over time.
+
+## Synopsis
+
+```bash
+rskey fingerprint -f <keyfile> [--mode <mode>]
+rskey fp -f <keyfile> [--mode <mode>]
+```
+
+## Flags
+
+<ParamField query="-f, --keyfile" type="string" required>
+  Path to the key file to fingerprint. Required.
+</ParamField>
+
+<ParamField query="--mode" type="string" default="default">
+  Algorithm used to compute the fingerprint. One of `default` or `workbench`.
+</ParamField>
+
+## Algorithm differences
+
+| Mode | Algorithm | Notes |
+|---|---|---|
+| `default` | SHA-256 of the key material | Used for Connect and Package Manager keys |
+| `workbench` | CRC32 of the key material | Matches the fingerprint emitted by `rstudio-server encrypt-password` |
+
+The `workbench` mode uses CRC32 for historical compatibility with Posit
+Workbench. Use it when comparing fingerprints against values shown in
+Workbench logs or produced by the `rstudio-server` CLI.
+
+## Examples
+
+<CodeGroup>
+
+```bash Default fingerprint (SHA-256)
+rskey fingerprint -f /var/lib/rstudio-pm/rstudio-pm.key
+```
+
+```bash Workbench fingerprint (CRC32)
+rskey fingerprint --mode=workbench -f /etc/rstudio/secure-cookie-key
+```
+
+</CodeGroup>
+
+<Warning>
+  The fingerprint is a convenience identifier only. It is **not** suitable for
+  cryptographic use, message authentication, or any security-sensitive
+  comparison. Do not use it as a substitute for a MAC or HMAC.
+</Warning>

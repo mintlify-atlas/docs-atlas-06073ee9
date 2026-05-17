@@ -1,0 +1,115 @@
+---
+title: "Automate rskey in Infrastructure-as-Code and containers"
+description: "Automate Posit product secret key provisioning in Terraform, Ansible, Docker, and CI/CD pipelines using rskey without installing the products first."
+---
+
+`rskey` was designed for Infrastructure-as-Code and containerized deployments. It has no dependency on a Posit product installation or license, so you can generate keys and encrypt secrets during image builds, Terraform applies, Ansible runs, or any other pipeline step — before the target product is ever installed on the machine.
+
+## Generating keys in automation
+
+<CodeGroup>
+
+```bash stdout (pipeline-friendly)
+# Capture key material directly from stdout
+KEY=$(rskey generate)
+echo "$KEY" | some-secret-manager store connect-key
+```
+
+```bash file output
+# Write directly to the destination path
+rskey generate -o /var/lib/rstudio-connect/rstudio-connect.key
+chmod 0600 /var/lib/rstudio-connect/rstudio-connect.key
+```
+
+</CodeGroup>
+
+When writing to a file, `rskey generate -o` sets the file permissions to `0600` automatically. The stdout form leaves permission management to you.
+
+<Tip>
+  Use `rskey fingerprint` to record a stable identifier for the key in your deployment logs or state store without ever logging the key material itself:
+
+  ```bash
+  rskey fingerprint -f /var/lib/rstudio-connect/rstudio-connect.key
+  # 3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c
+  ```
+</Tip>
+
+## Batch encryption via stdin
+
+`rskey encrypt` accepts newline-separated values on stdin. Each line is encrypted independently and the corresponding ciphertext is written to stdout on a new line:
+
+```bash
+cat secrets.txt | rskey encrypt -f /var/lib/rstudio-connect/rstudio-connect.key
+```
+
+This is useful when a deployment script needs to encrypt several values in sequence, or when the list of secrets is generated dynamically:
+
+```bash
+# Encrypt all values from a secrets file and write ciphertexts to another file
+cat plaintext-secrets.txt | \
+  rskey encrypt -f /var/lib/rstudio-connect/rstudio-connect.key \
+  > encrypted-secrets.txt
+```
+
+## Docker / container example
+
+A common pattern is to generate the key during the container's first-start entrypoint so each instance gets a unique key, rather than baking a shared key into the image.
+
+```dockerfile
+FROM ubuntu:24.04
+
+# Install rskey
+COPY rskey /usr/local/bin/rskey
+RUN chmod +x /usr/local/bin/rskey
+
+COPY entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+```
+
+```bash
+#!/bin/bash
+# entrypoint.sh
+
+KEY_PATH=/var/lib/rstudio-connect/rstudio-connect.key
+
+# Generate a unique key on first start
+if [ ! -f "$KEY_PATH" ]; then
+  rskey generate -o "$KEY_PATH"
+fi
+
+# Encrypt the database password from an environment variable and write
+# it into the config file. Remove the env var from memory afterwards.
+ENCRYPTED=$(echo "$DB_PASSWORD" | rskey encrypt -f "$KEY_PATH")
+unset DB_PASSWORD
+
+sed -i "s|^Password =.*|Password = $ENCRYPTED|" /etc/rstudio-connect/rstudio-connect.gcfg
+
+exec /usr/lib/rstudio-connect/bin/connect
+```
+
+<Note>
+  If you mount the key file from a persistent volume, the `if [ ! -f ... ]` guard ensures the same key survives container restarts. Without persistence, a new key is generated on every start and previously encrypted values will no longer decrypt.
+</Note>
+
+## Security considerations for automated use
+
+<Warning>
+  Mishandling key material in automated pipelines is easy. Follow these practices:
+
+  - **Do not store the key in an environment variable.** Environment variables are visible in process listings, container inspection output, and CI logs. Write the key directly to a file with `rskey generate -o`, or pipe it immediately into a secrets manager.
+  - **Restrict key file permissions.** The key file must be readable only by the service account running the Posit product. Use `0600` or tighter.
+  - **Use the fingerprint for identification.** When you need to reference which key is in use in a log entry, Terraform output, or Ansible fact, print the fingerprint rather than any portion of the key itself.
+  - **Rotate keys deliberately.** Re-encrypt all stored secrets with the new key before replacing the key file. There is no automatic re-encryption.
+</Warning>
+
+<Tip>
+  Verify the `rskey` binary signature before using it in production pipelines. Releases are signed with [Sigstore](https://www.sigstore.dev/) using GitHub's keyless OIDC mode:
+
+  ```bash
+  cosign verify-blob \
+    --signature rskey_0.5.0_linux_amd64.tar.gz.sig \
+    rskey_0.5.0_linux_amd64.tar.gz
+  ```
+
+  This confirms the binary was produced by the official GitHub Actions workflow and has not been tampered with.
+</Tip>

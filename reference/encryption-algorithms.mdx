@@ -1,0 +1,114 @@
+---
+title: "rskey encryption algorithms: Secretbox, AES-GCM, AES-CBC"
+description: "rskey uses NaCl Secretbox, AES-256-GCM (FIPS mode), or AES-128-CBC (Workbench). Reference for output formats, version bytes, and algorithm selection by product."
+---
+
+rskey supports three distinct encryption algorithms depending on the product and deployment mode. Connect and Package Manager default to NaCl Secretbox but can be switched to AES-256-GCM for FIPS compliance. Workbench always uses AES-128-CBC for compatibility with `rstudio-server`.
+
+<Tabs>
+  <Tab title="NaCl Secretbox (default)">
+    NaCl Secretbox is the default algorithm for Posit Connect and Package Manager. It combines XSalsa20 stream encryption with a Poly1305 MAC to provide authenticated encryption.
+
+    **Key material used:** first 32 bytes of the 512-byte key file.
+
+    **Nonce:** 192 bits (24 bytes), randomly generated per encryption.
+
+    **MAC:** Poly1305, providing 128-bit authentication.
+
+    **Implementation:** [`golang.org/x/crypto/nacl/secretbox`](https://pkg.go.dev/golang.org/x/crypto/nacl/secretbox) — the standard Go wrapper around the NaCl reference implementation.
+
+    **Output format:**
+
+    ```
+    base64( nonce[24] + ciphertext )
+    ```
+
+    The nonce is prepended directly to the ciphertext before base64 encoding. There is no version byte in this legacy format.
+
+    Some ciphertexts produced by older implementations carry an explicit version byte `0x01` before the nonce:
+
+    ```
+    base64( 0x01 + nonce[24] + ciphertext )
+    ```
+
+    `rskey decrypt` handles both forms transparently.
+
+    **Use this when:** you are encrypting secrets for Connect or Package Manager and do not have a FIPS compliance requirement.
+  </Tab>
+  <Tab title="AES-256-GCM (FIPS)">
+    AES-256-GCM is an Approved Security Function under [Federal Information Processing Standard 140-3](https://csrc.nist.gov/publications/detail/fips/140/3/final). It is available for Posit Connect 2022.03.0+ and Package Manager 2024.04.0+.
+
+    **Key material used:** first 32 bytes of the 512-byte key file (identical slice as NaCl).
+
+    **Nonce:** 96 bits (12 bytes), randomly generated per encryption.
+
+    **Authentication tag:** 128 bits (16 bytes), appended by `cipher.AEAD.Seal`.
+
+    **Minimum decoded ciphertext length:** 29 bytes (1 version + 12 nonce + 16 overhead).
+
+    **Output format:**
+
+    ```
+    base64( 0x02 + nonce[12] + ciphertext )
+    ```
+
+    The version byte `0x02` is always the first byte and is what `rskey decrypt` uses to select this algorithm automatically.
+
+    **Activate with:**
+
+    ```bash
+    rskey encrypt -f connect.key --mode=fips
+    ```
+
+    When the `crypt` package is compiled with `-tags fips`, `FIPSMode` is `true` and `Encrypt` / `EncryptBytes` always call `encryptAES` — the NaCl path returns `ErrFIPS`.
+
+    **Use this when:** your environment requires FIPS 140-3 compliant cryptography, and you are running Connect 2022.03.0+ or Package Manager 2024.04.0+.
+  </Tab>
+  <Tab title="AES-128-CBC (Workbench)">
+    AES-128-CBC is used exclusively for Posit Workbench secrets, preserving compatibility with `rstudio-server`'s built-in `encrypt-password` command.
+
+    **Key material used:** first 16 bytes of the (rotated) key file data.
+
+    **IV:** 32 bytes are allocated; only the first 16 are filled with random data and passed to the cipher. The remaining 16 bytes are zeroed. This matches the behavior of the original `rstudio-server` implementation.
+
+    **Padding:** PKCS#7. Input is padded to a multiple of 16 bytes (the AES block size). The padding byte value equals the number of padding bytes added.
+
+    **Integrity check:** CRC32 (IEEE polynomial) of the raw key bytes, formatted as an 8-character uppercase hex string. This checksum is embedded at both ends of the ciphertext.
+
+    **Output format:**
+
+    ```
+    hash8 + base64( iv[32] + ciphertext ) + hash8
+    ```
+
+    where `hash8` is the 8-character CRC32 hex string derived from the key.
+
+    **On decryption:** rskey verifies that the leading and trailing 8-byte checksums match each other and match the expected key checksum before attempting AES decryption. A mismatch returns `ErrFailedToDecrypt`.
+
+    <Warning>
+      AES-128-CBC provides no authenticated encryption. Integrity is protected only by the embedded CRC32 checksum, not by a cryptographic MAC. Use the NaCl or AES-256-GCM algorithms for Connect and Package Manager where authenticated encryption is required.
+    </Warning>
+
+    **Activate with:**
+
+    ```bash
+    rskey encrypt --mode=workbench -f /etc/rstudio/secure-cookie-key
+    ```
+
+    **Use this when:** encrypting secrets specifically for Posit Workbench.
+  </Tab>
+</Tabs>
+
+## Algorithm selection
+
+The `--mode` flag passed to `rskey encrypt` selects the algorithm:
+
+| `--mode` value | Algorithm | Products |
+|---|---|---|
+| _(omitted)_ | NaCl Secretbox | Connect, Package Manager |
+| `fips` | AES-256-GCM | Connect 2022.03.0+, Package Manager 2024.04.0+ |
+| `workbench` | AES-128-CBC | Posit Workbench |
+
+<Note>
+  `rskey decrypt` does not require a `--mode` flag. For Connect and Package Manager ciphertexts, the algorithm is determined from the version byte embedded at the start of the decoded payload (`0x01` or `0x02` for NaCl and AES-256-GCM respectively; no version byte defaults to NaCl). For Workbench ciphertexts, the algorithm is identified by the presence of matching CRC32 checksums at the start and end of the payload string.
+</Note>

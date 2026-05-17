@@ -1,133 +1,74 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "rskey: Secret key management for Posit products"
+description: "rskey generates and manages secret keys for Posit Connect, Package Manager, and Workbench — no product installation required."
 ---
 
-## Setting up
+rskey is a standalone command-line tool and Go library for generating secret keys and encrypting sensitive values in formats compatible with Posit Connect, Package Manager, and Workbench. It is designed for Infrastructure-as-Code and containerized deployments where the full Posit product stack is not yet installed.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install rskey via binary release, Go toolchain, or package manager on Linux, macOS, and Windows.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Generate your first key and encrypt a secret in under two minutes.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Command reference" icon="terminal" href="/commands/generate">
+    Explore all rskey commands: generate, encrypt, decrypt, and fingerprint.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Go packages" icon="code" href="/reference/go-packages">
+    Use the bundled `crypt` and `workbench` packages to integrate key management into your Go code.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What rskey does
 
-Everything you need to create world-class documentation.
+rskey replaces the secret key management commands built into each Posit product, so you can provision keys and encrypt configuration values before those products are installed. It supports all three products with their respective encryption schemes:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+- **Posit Connect & Package Manager** — NaCl Secretbox (default) or AES-256-GCM (FIPS mode)
+- **Posit Workbench** — AES-128-CBC with UUID-format keys
 
-## Make your content agent ready
+<Steps>
+  <Step title="Install rskey">
+    Download a binary release from GitHub or install via `go install`:
 
-Make your docs work for humans and AI agents alike.
+    ```bash
+    go install github.com/rstudio/rskey@latest
+    ```
+  </Step>
+  <Step title="Generate a secret key">
+    Create a new key file for your Posit product:
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
+    ```bash
+    rskey generate -o /var/lib/rstudio-pm/rstudio-pm.key
+    ```
+  </Step>
+  <Step title="Encrypt a sensitive value">
+    Encrypt a database password or other secret using the key:
 
-## Need inspiration?
+    ```bash
+    rskey encrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+    ```
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    Type your secret when prompted. rskey outputs the encrypted ciphertext.
+  </Step>
+  <Step title="Use the encrypted value">
+    Paste the encrypted output into your product's configuration file. Posit Connect, Package Manager, and Workbench all recognize and automatically decrypt these values at startup.
+  </Step>
+</Steps>
+
+## Guides by product
+
+<CardGroup cols={2}>
+  <Card title="Posit Connect" icon="plug" href="/guides/posit-connect">
+    Manage keys and encrypt config values for Posit Connect deployments.
+  </Card>
+  <Card title="Package Manager" icon="box" href="/guides/package-manager">
+    Generate keys and encrypt secrets for Posit Package Manager.
+  </Card>
+  <Card title="Workbench" icon="laptop-code" href="/guides/workbench">
+    Handle Workbench-specific key formats and AES-128-CBC encryption.
+  </Card>
+  <Card title="FIPS mode" icon="shield" href="/guides/fips-mode">
+    Use AES-256-GCM encryption to meet FIPS 140 compliance requirements.
+  </Card>
+</CardGroup>

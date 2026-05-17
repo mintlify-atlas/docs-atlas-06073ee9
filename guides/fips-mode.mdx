@@ -1,0 +1,103 @@
+---
+title: "FIPS mode: encrypt with AES-256-GCM for compliance"
+description: "Use rskey's --mode=fips to encrypt secrets with AES-256-GCM (FIPS 140-3 approved) for Posit Connect 2022.03.0+ and Package Manager 2024.04.0+."
+---
+
+FIPS mode uses AES-256-GCM instead of the default NaCl Secretbox algorithm to encrypt secrets. AES-256-GCM is an Approved Security Function under [Federal Information Processing Standard 140-3](https://csrc.nist.gov/publications/detail/fips/140/3/final), which is required in certain US government and regulated-industry environments. Both Posit Connect and Posit Package Manager can decrypt values produced in FIPS mode, subject to minimum product version requirements.
+
+## Why use FIPS mode
+
+<CardGroup cols={2}>
+  <Card title="Regulatory compliance" icon="shield-check">
+    AES-256-GCM is an FIPS 140-3 Approved Security Function. The default NaCl Secretbox algorithm is not, so if your organization's policy mandates FIPS-compliant cryptography you must use this mode.
+  </Card>
+  <Card title="AES-256-GCM vs NaCl Secretbox" icon="lock">
+    NaCl Secretbox uses XSalsa20-Poly1305. It is secure and widely trusted, but not FIPS-approved. AES-256-GCM uses a NIST-standardized cipher with authenticated encryption and is accepted by FIPS 140-3 validation programs.
+  </Card>
+</CardGroup>
+
+## Product version requirements
+
+<Info>
+  Encrypted values produced with `--mode=fips` will not decrypt on older product versions. Confirm your deployment meets these minimums before switching.
+</Info>
+
+| Product | Minimum version |
+| --- | --- |
+| Posit Connect | 2022.03.0 |
+| Posit Package Manager | 2024.04.0 |
+
+Workbench uses AES-128-CBC and does not use the FIPS mode described here. See [Manage secret keys for Posit Workbench](/guides/workbench) instead.
+
+## Encrypt with FIPS mode
+
+<Steps>
+  <Step title="Generate a key (same format)">
+    FIPS mode uses the same 512-byte hex-encoded key format as the default mode. No special key is needed:
+
+    ```bash
+    rskey generate -o /var/lib/rstudio-connect/rstudio-connect.key
+    chmod 0600 /var/lib/rstudio-connect/rstudio-connect.key
+    ```
+  </Step>
+
+  <Step title="Encrypt with --mode=fips">
+    Pass `--mode=fips` to use AES-256-GCM:
+
+    ```bash
+    rskey encrypt -f /var/lib/rstudio-connect/rstudio-connect.key --mode=fips
+    ```
+
+    ```
+    Type the sensitive data to encrypt, then press Enter:
+    Type the sensitive data again:
+    AgAAAAAAAAAAAAAAAAAAAA...==
+    ```
+
+    The output is base64-encoded. Internally it is structured as a 1-byte version prefix (`0x02`), a 12-byte nonce, and the AES-256-GCM ciphertext with a 16-byte authentication tag.
+
+    You can also encrypt via stdin:
+
+    ```bash
+    echo "my-db-password" | rskey encrypt -f /var/lib/rstudio-connect/rstudio-connect.key --mode=fips
+    ```
+  </Step>
+
+  <Step title="Decrypt (no flag required)">
+    `rskey decrypt` does not require `--mode=fips`. The version byte embedded in the ciphertext identifies the algorithm — `0x02` for AES-256-GCM, `0x01` for versioned NaCl Secretbox, and no prefix for the legacy NaCl Secretbox format:
+
+    ```bash
+    echo "AgAAAAAAAAAAAAAAAAAAAA...==" | rskey decrypt -f /var/lib/rstudio-connect/rstudio-connect.key
+    ```
+  </Step>
+</Steps>
+
+## Building rskey with FIPS mode enforced
+
+Pre-built binary releases use the standard (non-enforced) build. If you need a binary that refuses to use non-FIPS algorithms entirely — for example, to prevent accidental use of NaCl Secretbox in a strictly FIPS environment — build from source with the `fips` build tag:
+
+```bash
+go build -tags fips -o rskey github.com/rstudio/rskey
+```
+
+When built with this tag, the `FIPSMode` constant is `true` and any call to `Encrypt` (not `EncryptFIPS`) or `decryptSecretbox` returns an error immediately:
+
+```
+Non-AES algorithms cannot be used when running in FIPS mode
+```
+
+<Note>
+  Standard `rskey` binaries support both algorithms simultaneously. The `fips` build tag is only needed when your policy requires that non-FIPS algorithms be completely unavailable at the binary level.
+</Note>
+
+## Algorithm auto-detection on decrypt
+
+`rskey decrypt` inspects the first byte of the decoded ciphertext to determine which algorithm was used:
+
+| Version byte | Algorithm |
+| --- | --- |
+| `0x02` | AES-256-GCM (FIPS mode) |
+| `0x01` | NaCl Secretbox (versioned) |
+| any other | NaCl Secretbox (legacy, no prefix) |
+
+This means the same `rskey decrypt` command handles output from all three formats without requiring the caller to specify a mode.

@@ -1,0 +1,79 @@
+---
+title: "Generate keys and encrypt secrets for Posit Package Manager"
+description: "Generate Package Manager-compatible secret keys and encrypt sensitive configuration values as a drop-in for the rspm encrypt command."
+---
+
+`rskey` is a drop-in replacement for Package Manager's built-in `rspm encrypt` command. It generates the same key format and produces compatible encrypted values, so you can provision secrets in automated pipelines and container images without a Package Manager installation or license on the machine where you run it.
+
+## Generate a key
+
+<Steps>
+  <Step title="Generate the key file">
+    Write a new 512-byte hex-encoded key directly to the Package Manager key path:
+
+    ```bash
+    rskey generate -o /var/lib/rstudio-pm/rstudio-pm.key
+    ```
+
+    Restrict the file so only the Package Manager process can read it:
+
+    ```bash
+    chmod 0600 /var/lib/rstudio-pm/rstudio-pm.key
+    ```
+  </Step>
+
+  <Step title="Encrypt a configuration value">
+    Run `rskey encrypt` interactively. It prompts you to type the value twice without echoing it to the terminal:
+
+    ```bash
+    rskey encrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+    ```
+
+    ```
+    Type the sensitive data to encrypt, then press Enter:
+    Type the sensitive data again:
+    G8QSoVOR936MjjMdjFqvXYqM+m1zwH0H/aX0fO5RGg0logwPOhME0Wz0sp9g4fMtYdw=
+    ```
+
+    To encrypt multiple values in a script, pass them as newline-separated input on stdin:
+
+    ```bash
+    cat passwords.txt | rskey encrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+    ```
+  </Step>
+
+  <Step title="Add the encrypted value to Package Manager config">
+    Place the output in your `rstudio-pm.gcfg` under the relevant section. For a database password:
+
+    ```ini
+    [Database]
+    Password = G8QSoVOR936MjjMdjFqvXYqM+m1zwH0H/aX0fO5RGg0logwPOhME0Wz0sp9g4fMtYdw=
+    ```
+
+    Package Manager decrypts the value at startup using the key file path configured in your settings.
+  </Step>
+</Steps>
+
+## FIPS mode
+
+Package Manager 2024.04.0 and later supports AES-256-GCM encryption, an Approved Security Function under FIPS 140-3. To use it, pass `--mode=fips` when encrypting:
+
+```bash
+rskey encrypt -f /var/lib/rstudio-pm/rstudio-pm.key --mode=fips
+```
+
+<Note>
+  `rskey decrypt` does not require `--mode=fips`. The algorithm is encoded in the ciphertext version byte and detected automatically.
+</Note>
+
+See [Encrypt with FIPS 140-compliant AES-256-GCM](/guides/fips-mode) for a full walkthrough.
+
+## Key file security
+
+<Warning>
+  Anyone who obtains the key file can decrypt all values encrypted with it. Treat the key file as a credential.
+
+  - Set permissions to `0600` so only the owning user (the Package Manager service account) can read it.
+  - Do not commit the key file to version control.
+  - Rotate the key and re-encrypt all stored secrets if the key is ever exposed.
+</Warning>

@@ -1,0 +1,55 @@
+---
+title: "rskey decrypt — decrypt previously encrypted values"
+description: "rskey decrypt reverses rskey encrypt, recovering plaintext from ciphertext interactively or from stdin. Supports default and workbench modes. Flags: -f, --mode."
+---
+
+`rskey decrypt` takes a ciphertext string previously produced by `rskey encrypt` and recovers the original plaintext. Like its counterpart, it works both interactively (typing the ciphertext at the terminal prompt) and in batch mode (reading line-separated ciphertexts from stdin). Use this command to verify that encrypted values round-trip correctly, or to recover plaintext during debugging and key-rotation workflows.
+
+## Synopsis
+
+```bash
+rskey decrypt -f <keyfile> [--mode <mode>]
+```
+
+## Flags
+
+<ParamField query="-f, --keyfile" type="string" required>
+  Path to the key file that was used to encrypt the data. Required.
+</ParamField>
+
+<ParamField query="--mode" type="string" default="default">
+  Decryption mode. One of `default` or `workbench`.
+</ParamField>
+
+<Note>
+  You do not need to pass `--mode=fips` to decrypt ciphertext that was
+  encrypted in FIPS mode. The `default` mode automatically detects whether
+  the ciphertext was produced by NaCl Secretbox or AES-256-GCM and selects
+  the correct algorithm.
+</Note>
+
+## Examples
+
+<CodeGroup>
+
+```bash Decrypt via stdin (pipe)
+echo "G8QSoVOR936MjjMdjFqvXYqM+m1zwH0H/aX0fO5RGg0logwPOhME0Wz0sp9g4fMtYdw=" | \
+  rskey decrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+```
+
+```bash Interactive decrypt
+rskey decrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+```
+
+```bash Workbench mode
+rskey decrypt --mode=workbench -f /etc/rstudio/secure-cookie-key
+```
+
+</CodeGroup>
+
+## Stdin (batch) usage
+
+When stdin is a pipe, `rskey decrypt` reads one ciphertext per line and
+writes one plaintext per line to stdout. This mirrors the batch behavior of
+[rskey encrypt](/commands/encrypt) and is useful for bulk verification or
+migration tasks.

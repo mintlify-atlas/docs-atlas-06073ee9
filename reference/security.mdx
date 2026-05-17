@@ -1,0 +1,139 @@
+---
+title: "rskey security: key protection and binary verification"
+description: "rskey is not a general-purpose encryption tool. Learn its security model, key protection requirements, algorithm properties, and supply chain verification."
+---
+
+rskey is designed specifically for managing secrets in Posit product deployments. It generates key files compatible with the internal formats used by Connect, Package Manager, and Workbench, and produces encrypted values that those products can decrypt at startup. Understanding the security model is essential before using rskey in production infrastructure.
+
+<Warning>
+  This is not a general-purpose encryption tool. rskey is designed for a narrow use case: encrypting configuration secrets (such as database passwords) for Posit products. Do not use it for general data-at-rest encryption, inter-service communication, or any purpose beyond managing Posit product secrets.
+</Warning>
+
+## Key security
+
+The key file is the single secret that protects all encrypted values. Anyone with access to the key file can decrypt every value encrypted with it.
+
+- **File permissions:** Set key files to `0600` (owner read/write only). Posit products enforce this as well.
+
+  ```bash
+  chmod 0600 /var/lib/rstudio-pm/rstudio-pm.key
+  ```
+
+- **Never commit key files to version control.** A key file checked into a repository — even briefly — should be considered compromised and rotated immediately.
+
+- **Do not pass key content in environment variables.** Environment variables are visible to all processes running as the same user and may be logged by process supervisors. Pass the file path to the key instead:
+
+  ```bash
+  # Correct: pass the path
+  rskey encrypt -f /etc/rstudio/connect.key
+
+  # Wrong: do not embed key bytes in environment variables
+  export RSKEY="$(cat /etc/rstudio/connect.key)"
+  ```
+
+- **Key length:** Connect and Package Manager keys are 512 bytes (4096 bits) of cryptographically secure random data. Only the first 32 bytes are used as key material by the encryption algorithms; the remaining bytes provide defense in depth against key derivation attacks.
+
+## Algorithm security properties
+
+### NaCl Secretbox (default, Connect and Package Manager)
+
+NaCl Secretbox combines XSalsa20 stream encryption with a Poly1305 MAC. It provides **authenticated encryption**: decryption fails with `ErrFailedToDecrypt` if the ciphertext has been tampered with or was encrypted with a different key. A fresh 192-bit random nonce is generated for every encryption call, ensuring that identical plaintexts produce different ciphertexts.
+
+### AES-256-GCM (FIPS mode, Connect and Package Manager)
+
+AES-256-GCM is an **AEAD (Authenticated Encryption with Associated Data)** mode and an Approved Security Function under [FIPS 140-3](https://csrc.nist.gov/publications/detail/fips/140/3/final). Like NaCl Secretbox, it provides both confidentiality and integrity guarantees. The 96-bit random nonce ensures ciphertext uniqueness across encryptions of the same value. The GCM authentication tag is 128 bits.
+
+Select this algorithm when your environment mandates FIPS 140-3 compliance:
+
+```bash
+rskey encrypt -f connect.key --mode=fips
+```
+
+### AES-128-CBC (Workbench)
+
+AES-128-CBC provides **confidentiality only — no authentication.** Integrity is protected by a CRC32 checksum embedded in the ciphertext, which is not a cryptographic MAC. CRC32 can detect accidental corruption but does not protect against deliberate tampering by an attacker who also has the key.
+
+<Info>
+  The AES-128-CBC implementation intentionally preserves compatibility with `rstudio-server`'s internal format, including its non-standard 32-byte IV allocation (only the first 16 bytes are used). Do not use Workbench mode for anything other than Workbench secret management.
+</Info>
+
+## Binary verification
+
+Release binaries are signed using [Sigstore](https://www.sigstore.dev/) with Cosign in keyless mode.
+
+**Keyless signing** uses short-lived ephemeral certificates issued by Sigstore's Certificate Authority. The signer (GitHub Actions for this repository) authenticates via an OpenID Connect token. There is no long-lived private signing key to protect or rotate; the identity is bound to the GitHub repository at release time and recorded in Sigstore's public transparency log.
+
+To verify a release binary before use:
+
+```bash
+cosign verify-blob \
+  --signature rskey_0.5.0_linux_amd64.tar.gz.sig \
+  rskey_0.5.0_linux_amd64.tar.gz
+```
+
+Replace `0.5.0` and `linux_amd64` with the version and platform you downloaded. The `cosign` tool is available from [sigstore/cosign](https://github.com/sigstore/cosign).
+
+<Note>
+  Cosign's keyless verification checks the Sigstore transparency log to confirm that the signature was produced by a GitHub Actions workflow in the `rstudio/rskey` repository. This ties the binary to a specific source code commit.
+</Note>
+
+## Key rotation
+
+Regular key rotation limits the exposure window if a key is ever compromised. rskey provides a fingerprint command to help track which key encrypted a given secret.
+
+### Identifying the active key
+
+```bash
+# Connect / Package Manager key (SHA-256 fingerprint)
+rskey fingerprint -f /var/lib/rstudio-pm/rstudio-pm.key
+
+# Workbench key (CRC32 fingerprint — matches rstudio-server output)
+rskey fingerprint --mode=workbench -f /etc/rstudio/secure-cookie-key
+```
+
+Posit products log the key fingerprint at startup. Compare the logged fingerprint with the output above to confirm which key file is in use.
+
+### Rotation procedure
+
+<Steps>
+  <Step title="Record the current fingerprint">
+    ```bash
+    rskey fingerprint -f /var/lib/rstudio-pm/rstudio-pm.key
+    ```
+
+    Save this value. You will need it to identify secrets that must be re-encrypted.
+  </Step>
+  <Step title="Generate a new key file">
+    ```bash
+    rskey generate -o /var/lib/rstudio-pm/rstudio-pm-new.key
+    chmod 0600 /var/lib/rstudio-pm/rstudio-pm-new.key
+    ```
+  </Step>
+  <Step title="Re-encrypt all secrets">
+    For each encrypted value in your product configuration, decrypt it with the old key and re-encrypt with the new key:
+
+    ```bash
+    # Decrypt with old key
+    echo "$CIPHER" | rskey decrypt -f /var/lib/rstudio-pm/rstudio-pm.key
+
+    # Re-encrypt with new key
+    echo "$PLAINTEXT" | rskey encrypt -f /var/lib/rstudio-pm/rstudio-pm-new.key
+    ```
+
+    Update the product configuration files with the new encrypted values.
+  </Step>
+  <Step title="Replace the key file and restart">
+    ```bash
+    mv /var/lib/rstudio-pm/rstudio-pm-new.key /var/lib/rstudio-pm/rstudio-pm.key
+    ```
+
+    Restart the product. Verify it starts correctly and that the new fingerprint appears in the logs.
+  </Step>
+  <Step title="Securely delete the old key">
+    Once you have confirmed the product is running correctly with the new key, securely delete the old key material from any backups or temporary locations where it may have been stored.
+  </Step>
+</Steps>
+
+<Warning>
+  Do not delete the old key until you have confirmed that all secrets have been successfully re-encrypted and the product is operating normally. Keep a secure backup of the old key until the rotation is verified.
+</Warning>

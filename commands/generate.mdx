@@ -1,0 +1,54 @@
+---
+title: "rskey generate — create a new Posit-compatible secret key"
+description: "rskey generate writes a newly-generated Posit Connect/Package Manager secret key to stdout or an output file. Flags: -o/--output to specify the file path."
+---
+
+`rskey generate` creates a new secret key compatible with Posit Connect and Package Manager. The key is a sequence of 512 hex-encoded, securely-generated random bytes written to stdout by default, or to a file when you supply `-o`. Use this command whenever you need to provision a fresh key — for example, during initial server setup or after a key rotation.
+
+## Synopsis
+
+```bash
+rskey generate [-o <file>]
+```
+
+## Flags
+
+<ParamField query="-o, --output" type="string">
+  Write the generated key to this file path instead of stdout. The file is
+  created with permissions `0600` (readable only by the owning user).
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```bash Write key to stdout
+rskey generate
+```
+
+```bash Write key to a file with -o
+rskey generate -o /var/lib/rstudio-pm/rstudio-pm.key
+```
+
+```bash Redirect stdout to a file
+rskey generate > /var/lib/rstudio-pm/rstudio-pm.key
+```
+
+</CodeGroup>
+
+<Note>
+  When you use `-o`, the file is written with mode `0600`. Shell redirection
+  (`>`) does not set permissions automatically — set them separately with
+  `chmod 600 <file>` if needed.
+</Note>
+
+<Info>
+  `rskey generate` is functionally equivalent to `openssl rand -hex 512`.
+  Both produce 512 hex-encoded random bytes suitable for use as a Connect or
+  Package Manager secret key.
+</Info>
+
+## What next?
+
+Once you have a key file, use [rskey encrypt](/commands/encrypt) to encrypt
+sensitive configuration values such as database passwords.

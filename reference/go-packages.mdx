@@ -1,0 +1,251 @@
+---
+title: "Go package reference: crypt and workbench for rskey"
+description: "The crypt and workbench Go packages expose rskey's key generation and encryption logic for programmatic use. Import from github.com/rstudio/rskey/crypt."
+---
+
+rskey ships two importable Go packages for programmatic use. The `crypt` package handles key generation and encryption for Connect and Package Manager. The `workbench` package handles the compatible-but-distinct format used by Posit Workbench. Both packages are versioned alongside the `rskey` CLI under strict semantic versioning.
+
+## Import paths
+
+```go
+import "github.com/rstudio/rskey/crypt"
+import "github.com/rstudio/rskey/workbench"
+```
+
+The module path is `github.com/rstudio/rskey` (see `go.mod`). Add it to your project with:
+
+```bash
+go get github.com/rstudio/rskey@latest
+```
+
+## Package crypt
+
+### Constants and errors
+
+```go
+const KeyLength = 512
+```
+
+`KeyLength` is the fixed length of a `Key` in bytes. The encoded (hex) form on disk is 1024 characters.
+
+```go
+var ErrInvalidKeyLength = errors.New("Encryption keys must be 512 bytes when decoded")
+var ErrPayLoadTooShort  = errors.New("Payload is too short to be encrypted")
+var ErrFailedToDecrypt  = errors.New("Decryption failed")
+var ErrFIPS             = errors.New("Non-AES algorithms cannot be used when running in FIPS mode")
+```
+
+`ErrFIPS` is returned by `encryptSecretbox` and `decryptSecretbox` when the package is compiled with `-tags fips`. It surfaces through any call to `Encrypt`, `EncryptBytes`, or `Decrypt` that would otherwise use NaCl.
+
+```go
+const FIPSMode bool
+```
+
+`FIPSMode` is a compile-time constant. It is `false` in standard builds (`nacl.go`) and `true` in FIPS builds (`fips.go`). Inspect this value at runtime to determine which encryption path will be taken by `Encrypt` and `EncryptBytes`.
+
+### Key type
+
+```go
+type Key [512]byte
+```
+
+`Key` is a securely-generated, opaque 512-byte array. All encryption and decryption methods are defined on `*Key`.
+
+### Constructors
+
+```go
+func NewKey() (*Key, error)
+```
+
+Generates a new key from `crypto/rand`. As of Go 1.24, `rand.Read` aborts rather than returning an error, so this function never returns a non-nil error despite its signature.
+
+```go
+func NewKeyFromBytes(src []byte) (*Key, error)
+```
+
+Parses a key from a byte slice. Accepts both hex-encoded (1024 chars) and standard base64-encoded input. Returns `ErrInvalidKeyLength` if the decoded length is not exactly 512 bytes.
+
+```go
+func NewKeyFromReader(src io.Reader) (*Key, error)
+```
+
+Reads all bytes from an `io.Reader` and delegates to `NewKeyFromBytes`. Useful for reading key files directly:
+
+```go
+f, _ := os.Open("connect.key")
+defer f.Close()
+key, err := crypt.NewKeyFromReader(f)
+```
+
+### Serialization
+
+```go
+func (k *Key) HexString() string
+```
+
+Returns the key as a 1024-character lowercase hex string, suitable for writing to disk. The internal representation is XOR-rotated before encoding for historical compatibility reasons.
+
+### Encryption
+
+```go
+func (k *Key) Encrypt(s string) (string, error)
+```
+
+Encrypts a string and returns base64-encoded ciphertext. In a standard build this uses NaCl Secretbox; in a FIPS build it uses AES-256-GCM. Equivalent to `EncryptBytes([]byte(s))`.
+
+```go
+func (k *Key) EncryptBytes(bytes []byte) (string, error)
+```
+
+Encrypts a raw byte slice and returns base64-encoded ciphertext. Respects `FIPSMode`.
+
+```go
+func (k *Key) EncryptFIPS(s string) (string, error)
+```
+
+Always uses AES-256-GCM regardless of the `FIPSMode` build tag. Equivalent to `EncryptBytesFIPS([]byte(s))`. Never returns an error.
+
+```go
+func (k *Key) EncryptBytesFIPS(bytes []byte) (string, error)
+```
+
+Always uses AES-256-GCM for raw bytes. Never returns an error.
+
+### Decryption
+
+```go
+func (k *Key) Decrypt(s string) (string, error)
+```
+
+Decrypts base64-encoded ciphertext. Auto-detects the algorithm from the first decoded byte: `0x01` → NaCl Secretbox (versioned), `0x02` → AES-256-GCM, anything else → NaCl Secretbox (legacy unversioned). Equivalent to `string(DecryptBytes(s))`.
+
+```go
+func (k *Key) DecryptBytes(s string) ([]byte, error)
+```
+
+Decrypts base64-encoded ciphertext and returns the raw bytes. Returns `ErrPayLoadTooShort` if the payload is too short, `ErrFailedToDecrypt` if decryption fails, or `ErrFIPS` if the payload requires NaCl and the build is in FIPS mode.
+
+### Key identification
+
+```go
+func (k *Key) Fingerprint() string
+```
+
+Returns a hex-encoded SHA-256 hash of the key bytes. Not suitable for cryptographic use; intended for identifying keys in logs and API responses during key rotation. Note: the fingerprint is computed over the internal (rotated) key bytes, not the on-disk representation.
+
+## Package workbench
+
+### Errors
+
+The `workbench` package reuses `crypt.ErrInvalidKeyLength`, `crypt.ErrPayLoadTooShort`, and `crypt.ErrFailedToDecrypt`. It adds one additional error:
+
+```go
+var ErrMissingChecksum = errors.New("payload missing embedded checksums")
+```
+
+Returned when the leading and trailing 8-byte CRC32 checksums in a ciphertext do not match each other.
+
+### Key type
+
+```go
+type Key struct { ... }  // opaque
+```
+
+`Key` holds the rotated key bytes and a pre-computed CRC32 checksum string. The checksum is computed over the raw (pre-rotation) input bytes.
+
+### Constructors
+
+```go
+func NewKeyFromBytes(src []byte) (*Key, error)
+```
+
+Parses a Workbench key from a byte slice. Requires at least 32 bytes (`minKeyLength`); returns `crypt.ErrInvalidKeyLength` otherwise. The checksum is computed before rotation.
+
+```go
+func NewKeyFromReader(src io.Reader) (*Key, error)
+```
+
+Reads all bytes from an `io.Reader` and delegates to `NewKeyFromBytes`.
+
+### Encryption and decryption
+
+```go
+func (k *Key) Encrypt(s string) (string, error)
+```
+
+Encrypts a string using AES-128-CBC. Produces output in the format `hash8 + base64(iv[32] + ciphertext) + hash8` where `hash8` is the 8-character CRC32 hex string. PKCS#7 padding is applied automatically.
+
+```go
+func (k *Key) Decrypt(s string) (string, error)
+```
+
+Decrypts a Workbench ciphertext. Verifies the embedded CRC32 checksums before attempting AES decryption. Returns `ErrMissingChecksum` if the two checksums differ, `crypt.ErrFailedToDecrypt` if the checksum does not match the key, or `crypt.ErrPayLoadTooShort` if the payload is too short.
+
+### Key identification
+
+```go
+func (k *Key) Fingerprint() string
+```
+
+Returns the 8-character uppercase CRC32 hex string of the raw key bytes. This matches the hash reported by `rstudio-server encrypt-password` and is embedded in every Workbench ciphertext.
+
+## Usage example
+
+```go
+package main
+
+import (
+    "fmt"
+    "os"
+    "github.com/rstudio/rskey/crypt"
+)
+
+func main() {
+    // Generate a new key
+    key, err := crypt.NewKey()
+    if err != nil {
+        panic(err)
+    }
+
+    // Write key to disk
+    err = os.WriteFile("connect.key", []byte(key.HexString()), 0600)
+    if err != nil {
+        panic(err)
+    }
+
+    // Encrypt a value
+    cipher, err := key.Encrypt("my-database-password")
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println("Encrypted:", cipher)
+
+    // Decrypt it back
+    plain, err := key.Decrypt(cipher)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println("Decrypted:", plain)
+}
+```
+
+## FIPS build tag
+
+To enforce FIPS mode at compile time, build with the `fips` tag:
+
+```bash
+go build -tags fips ./...
+```
+
+When compiled this way:
+
+- `crypt.FIPSMode` is `true`
+- `crypt.Encrypt` and `crypt.EncryptBytes` always use AES-256-GCM
+- Any call path that reaches `encryptSecretbox` or `decryptSecretbox` returns `crypt.ErrFIPS`
+- `crypt.Decrypt` returns `ErrFIPS` if the ciphertext version byte (`0x01` or unversioned) indicates NaCl
+
+The `workbench` package is unaffected by the `fips` build tag; it always uses AES-128-CBC.
+
+<Note>
+  `rskey` and its packages follow strict semantic versioning. The Go module path is `github.com/rstudio/rskey`. Pin to a specific version in production to avoid unexpected API changes.
+</Note>

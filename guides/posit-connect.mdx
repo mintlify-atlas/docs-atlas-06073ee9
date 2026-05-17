@@ -1,0 +1,88 @@
+---
+title: "Generate keys and encrypt secrets for Posit Connect"
+description: "Generate Connect-compatible secret keys and encrypt database passwords or other sensitive configuration values for Posit Connect deployments."
+---
+
+`rskey` is a drop-in replacement for Posit Connect's built-in `rscadmin configure --encrypt-config-value` command. You can use it to generate secret keys and encrypt sensitive configuration values — such as database passwords — without needing a Connect installation or license on the machine where you run it. This makes it particularly useful for provisioning secrets in automated and containerized deployments.
+
+## Generate a key
+
+<Steps>
+  <Step title="Generate the key file">
+    Write a new 512-byte hex-encoded key directly to the Connect key path:
+
+    ```bash
+    rskey generate -o /var/lib/rstudio-connect/rstudio-connect.key
+    ```
+
+    Restrict the file so only the Connect process can read it:
+
+    ```bash
+    chmod 0600 /var/lib/rstudio-connect/rstudio-connect.key
+    ```
+  </Step>
+
+  <Step title="Encrypt a configuration value">
+    Run `rskey encrypt` interactively. It prompts you to type the value twice without echoing it to the terminal:
+
+    ```bash
+    rskey encrypt -f /var/lib/rstudio-connect/rstudio-connect.key
+    ```
+
+    ```
+    Type the sensitive data to encrypt, then press Enter:
+    Type the sensitive data again:
+    G8QSoVOR936MjjMdjFqvXYqM+m1zwH0H/aX0fO5RGg0logwPOhME0Wz0sp9g4fMtYdw=
+    ```
+
+    For scripting or batch use, pipe line-separated values on stdin instead:
+
+    ```bash
+    echo "my-db-password" | rskey encrypt -f /var/lib/rstudio-connect/rstudio-connect.key
+    ```
+  </Step>
+
+  <Step title="Add the encrypted value to Connect config">
+    Place the output in your `rstudio-connect.gcfg` under the relevant section. For a database password:
+
+    ```ini
+    [Database]
+    Password = G8QSoVOR936MjjMdjFqvXYqM+m1zwH0H/aX0fO5RGg0logwPOhME0Wz0sp9g4fMtYdw=
+    ```
+
+    Connect will decrypt this at startup using the key file specified in your configuration.
+  </Step>
+</Steps>
+
+## FIPS mode
+
+Connect 2022.03.0 and later supports AES-256-GCM encryption, an Approved Security Function under FIPS 140-3. To use it, pass `--mode=fips` when encrypting:
+
+```bash
+rskey encrypt -f /var/lib/rstudio-connect/rstudio-connect.key --mode=fips
+```
+
+<Note>
+  `rskey decrypt` does not require `--mode=fips`. The algorithm is encoded in the ciphertext version byte and detected automatically.
+</Note>
+
+See [Encrypt with FIPS 140-compliant AES-256-GCM](/guides/fips-mode) for a full walkthrough.
+
+## Verify a key with its fingerprint
+
+The `rskey fingerprint` command prints a SHA-256 fingerprint that identifies the key in Connect log messages and API responses. Use it to confirm the correct key is in place without exposing the key material:
+
+```bash
+rskey fingerprint -f /var/lib/rstudio-connect/rstudio-connect.key
+# 3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c
+```
+
+## Key file security
+
+<Warning>
+  Anyone who obtains the key file can decrypt all values encrypted with it. Treat the key file as a credential.
+
+  - Set permissions to `0600` so only the owning user (the Connect service account) can read it.
+  - Do not commit the key file to version control.
+  - Rotate the key and re-encrypt all stored secrets if the key is ever exposed.
+</Warning>

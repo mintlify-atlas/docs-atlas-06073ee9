@@ -1,0 +1,77 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "rskey",
+  "projectDescription": "A command-line tool and Go library for generating and managing secret keys compatible with Posit Connect, Package Manager, and Workbench.",
+  "theme": "palm",
+  "primaryColor": "#eb6434",
+  "lightColor": "#44729b",
+  "darkColor": "#8d6c6b",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "commands/generate",
+              "commands/encrypt",
+              "commands/decrypt",
+              "commands/fingerprint"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/posit-connect",
+              "guides/package-manager",
+              "guides/workbench",
+              "guides/fips-mode",
+              "guides/infrastructure-as-code"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/encryption-algorithms",
+              "reference/key-formats",
+              "reference/go-packages",
+              "reference/security"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Generate secret keys compatible with Posit Connect, Package Manager, and Workbench",
+    "Encrypt and decrypt sensitive values (e.g., database passwords) using NaCl Secretbox or AES-256-GCM",
+    "FIPS 140-compliant encryption mode using AES-256-GCM",
+    "Workbench support using AES-128-CBC with UUID-format keys",
+    "Key fingerprinting for safe identification in logs and API responses",
+    "No license key required; designed for IaC and containerized deployments",
+    "Binary releases signed with Sigstore/Cosign for supply chain security",
+    "Embeddable Go packages (crypt, workbench) for programmatic use"
+  ],
+  "publicApiSurface": [
+    "rskey generate [-o <output-file>]",
+    "rskey encrypt -f <keyfile> [--mode=default|fips|workbench]",
+    "rskey decrypt -f <keyfile> [--mode=default|workbench]",
+    "rskey fingerprint -f <keyfile> [--mode=default|workbench]",
+    "crypt.NewKey() *Key",
+    "crypt.NewKeyFromReader(src io.Reader) (*Key, error)",
+    "crypt.NewKeyFromBytes(src []byte) (*Key, error)",
+    "(*crypt.Key).Encrypt(s string) (string, error)",
+    "(*crypt.Key).EncryptFIPS(s string) (string, error)",
+    "(*crypt.Key).Decrypt(s string) (string, error)",
+    "(*crypt.Key).Fingerprint() string",
+    "workbench.NewKeyFromReader(src io.Reader) (*Key, error)",
+    "(*workbench.Key).Encrypt(s string) (string, error)",
+    "(*workbench.Key).Decrypt(s string) (string, error)",
+    "(*workbench.Key).Fingerprint() string"
+  ]
+}

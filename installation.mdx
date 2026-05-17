@@ -1,0 +1,68 @@
+---
+title: "Install rskey: binary releases, go install, and verification"
+description: "Download rskey binary releases for Linux, macOS, and Windows, or install from source with go install. Includes Sigstore signature verification steps."
+---
+
+rskey distributes pre-built binaries for all major platforms. You can download a release archive directly from GitHub, install a `.deb` or `.rpm` package on Linux, or build from source using the Go toolchain. No license key or product installation is required.
+
+## Binary releases
+
+Pre-built binaries are available on the [rskey GitHub releases page](https://github.com/rstudio/rskey/releases) for the following platforms and architectures:
+
+| Platform | Architectures | Format |
+|---|---|---|
+| Linux | amd64, arm64 | `.tar.gz` |
+| macOS | amd64, arm64 | `.tar.gz` |
+| Windows | amd64, arm64 | `.zip` |
+
+Linux users can also install `.deb` and `.rpm` packages from the same releases page. These packages place the `rskey` binary in your `PATH` and include the `LICENSE`, `README.md`, and `NOTICE.md` files under `/usr/share/doc/rskey/`.
+
+To install from an archive:
+
+```bash
+# Download and extract (Linux amd64 example)
+tar -xzf rskey_0.5.0_linux_amd64.tar.gz
+
+# Move the binary to a directory in your PATH
+sudo mv rskey /usr/local/bin/
+```
+
+To install the `.deb` package:
+
+```bash
+sudo dpkg -i rskey_0.5.0_linux_amd64.deb
+```
+
+To install the `.rpm` package:
+
+```bash
+sudo rpm -i rskey_0.5.0_linux_amd64.rpm
+```
+
+## Install with Go
+
+If you have Go 1.24 or later installed, you can build and install rskey directly from source:
+
+```bash
+go install github.com/rstudio/rskey@latest
+```
+
+This places the `rskey` binary in `$GOPATH/bin` (typically `~/go/bin`). Make sure that directory is in your `PATH`.
+
+## Verify binary signatures
+
+All rskey binary releases are signed with [Sigstore](https://www.sigstore.dev/) using Cosign's [keyless mode](https://docs.sigstore.dev/cosign/signing/overview/). Keyless signing uses OpenID Connect tokens issued by GitHub Actions for this repository and short-lived ephemeral certificates instead of long-lived private keys, which means there is no signing key to manage or rotate.
+
+To verify a release archive, install the [`cosign` CLI](https://docs.sigstore.dev/cosign/system_config/installation/) and run:
+
+```bash
+cosign verify-blob \
+  --signature rskey_0.5.0_linux_amd64.tar.gz.sig \
+  rskey_0.5.0_linux_amd64.tar.gz
+```
+
+Each release archive has a corresponding `.sig` file on the releases page. Download both the archive and its `.sig` file before running `cosign verify-blob`. If the signature is valid, cosign prints a confirmation message and exits with code 0.
+
+<Note>
+rskey does not require a Posit product license, a Posit account, or any product installation. You can generate keys and encrypt secrets on any machine where rskey is installed, regardless of whether Posit Connect, Package Manager, or Workbench is present.
+</Note>
